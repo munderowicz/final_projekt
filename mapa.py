@@ -6,6 +6,7 @@ import geopandas as gpd
 import matplotlib.pyplot as plt
 from shapely.geometry import Point
 from datetime import datetime
+from jinja2 import Template
  
 app = Flask(__name__)
  
@@ -41,78 +42,221 @@ def refresh_and_save_data():
         return new_data
     return None
  
-# Funkcja do generowania wizualizacji
-def generate_visualization(data):
-    warning_data = data[data['stan'].between(450, 499, inclusive='left')]
-    alarm_data = data[data['stan'] >= 500]
+# Funkcja do klasyfikacji poziomów wód
+def classify_water_levels(data):
+    alarm_state = []
+    warning_state = []
+    normal_state = []
+    for row in data:
+        try:
+            if row['stan'] is not None:
+                level = float(row['stan'])
+                if level >= 500:
+                    alarm_state.append(row)
+                elif 450 <= level < 500:
+                    warning_state.append(row)
+                else:
+                    normal_state.append(row)
+        except (ValueError, TypeError):
+            continue
+    return alarm_state, warning_state, normal_state
  
-    warning_geometry = [Point(xy) for xy in zip(warning_data['lon'], warning_data['lat'])]
-    alarm_geometry = [Point(xy) for xy in zip(alarm_data['lon'], alarm_data['lat'])]
+# Funkcja do generowania raportu HTML
+def generate_html_from_csv(csv_file='hydro_data.csv', output_file='hydro_table.html'):
+    # Wczytaj dane z pliku CSV
+    data = []
+    with open(csv_file, mode='r', encoding='utf-8-sig') as file:
+        reader = pd.read_csv(file, delimiter=';')
+        for row in reader:
+            # Konwersja pustych wartości na None dla lepszego wyświetlania
+            cleaned_row = {k: (v if v != '' else None) for k, v in row.items()}
+            data.append(cleaned_row)
  
-    warning_gdf = gpd.GeoDataFrame(warning_data, geometry=warning_geometry, crs="EPSG:4326")
-    alarm_gdf = gpd.GeoDataFrame(alarm_data, geometry=alarm_geometry, crs="EPSG:4326")
+    # Klasyfikacja stanów wód
+    alarm_state, warning_state, normal_state = classify_water_levels(data)
  
-    # Załaduj granice Polski (GeoJSON)
-    poland = gpd.read_file('/path/to/poland.geojson')
- 
-    # Rysowanie mapy
-    fig, ax = plt.subplots(figsize=(10, 10))
-    poland.plot(ax=ax, color='lightgray')
-    warning_gdf.plot(ax=ax, marker='o', color='orange', markersize=5, label='Poziom Ostrzegawczy')
-    alarm_gdf.plot(ax=ax, marker='o', color='red', markersize=5, label='Poziom Alarmowy')
- 
-    plt.legend()
-    plt.title('Stacje z poziomem ostrzegawczym i alarmowym na mapie Polski')
-    plt.show()
- 
-# Trasa główna strony
-@app.route('/')
-def index():
-    data = pd.read_csv(CSV_FILE, delimiter=';')
-    generate_visualization(data)
-    return render_template_string("""
-<html>
+    # Szablon HTML z tabelami danych
+    html_template = Template("""
+<!DOCTYPE html>
+<html lang="pl">
 <head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dane hydrologiczne IMGW (hydro2)</title>
 <style>
-                    body {
-                        font-family: Arial, sans-serif;
-                        margin: 0;
-                        padding: 0;
-                    }
-                    h1 {
-                        text-align: center;
-                        margin-top: 20px;
-                    }
-                    #refresh-button {
-                        position: fixed;
-                        top: 20px;
-                        right: 20px;
-                        padding: 15px 30px;
-                        background-color: #3498db;
-                        color: white;
-                        font-size: 16px;
-                        border: none;
-                        border-radius: 5px;
-                        cursor: pointer;
-                        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-                    }
-                    #refresh-button:hover {
-                        background-color: #2980b9;
-                    }
-                    p {
-                        text-align: center;
-                    }
+            body {
+                font-family: Arial, sans-serif;
+                margin: 20px;
+                background-color: #f5f5f5;
+            }
+            h1, h2 {
+                color: #2c3e50;
+                text-align: center;
+            }
+            .table-container {
+                overflow-x: auto;
+                margin: 20px 0;
+                background: white;
+                padding: 20px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 0.9em;
+                margin-bottom: 20px;
+            }
+            th, td {
+                padding: 10px 12px;
+                text-align: left;
+                border-bottom: 1px solid #ddd;
+            }
+            th {
+                background-color: #3498db;
+                color: white;
+                position: sticky;
+                top: 0;
+            }
+            .footer {
+                text-align: center;
+                margin-top: 20px;
+                color: #7f8c8d;
+                font-size: 0.9em;
+            }
+            .summary {
+                display: flex;
+                justify-content: space-around;
+                margin-bottom: 20px;
+            }
+            .summary-box {
+                padding: 15px;
+                border-radius: 8px;
+                text-align: center;
+                font-weight: bold;
+                color: white;
+            }
+            .alarm-summary {
+                background-color: #ff4444;
+            }
+            .warning-summary {
+                background-color: #ffc107;
+            }
+            .normal-summary {
+                background-color: #28a745;
+            }
+            #refresh-button {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 30px;
+                background-color: #3498db;
+                color: white;
+                font-size: 16px;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            }
+            #refresh-button:hover {
+                background-color: #2980b9;
+            }
 </style>
 </head>
 <body>
-<h1>Hydrologiczne dane IMGW</h1>
-<button id="refresh-button" onclick="window.location.href='/refresh'">Odśwież dane</button>
-<p>Ostatnia aktualizacja: {{ timestamp }}</p>
+<h1>Dane hydrologiczne IMGW (hydro2)</h1>
+ 
+        <div class="summary">
+<div class="summary-box alarm-summary">
+                Stany alarmowe (≥500): {{ alarm_state|length }}
+</div>
+<div class="summary-box warning-summary">
+                Stany ostrzegawcze (450-499): {{ warning_state|length }}
+</div>
+<div class="summary-box normal-summary">
+                Stany normalne (<450): {{ normal_state|length }}
+</div>
+</div>
+ 
+        <button id="refresh-button" onclick="window.location.href='/refresh'">Odśwież dane</button>
+ 
+        <h2>⚠️ Stany alarmowe (≥500)</h2>
+<div class="table-container alarm">
+<table>
+<thead>
+<tr>
+<th>Kod stacji</th>
+<th>Nazwa stacji</th>
+<th>Współrzędne</th>
+<th>Stan wody</th>
+</tr>
+</thead>
+<tbody>
+                    {% for row in alarm_state %}
+<tr>
+<td>{{ row['kod_stacji'] }}</td>
+<td>{{ row['nazwa_stacji'] }}</td>
+<td>{{ row['lon'] }}, {{ row['lat'] }}</td>
+<td>{{ row['stan'] }}</td>
+</tr>
+                    {% endfor %}
+</tbody>
+</table>
+</div>
+ 
+        <h2>⚠ Stany ostrzegawcze (450-499)</h2>
+<div class="table-container warning">
+<table>
+<thead>
+<tr>
+<th>Kod stacji</th>
+<th>Nazwa stacji</th>
+<th>Współrzędne</th>
+<th>Stan wody</th>
+</tr>
+</thead>
+<tbody>
+                    {% for row in warning_state %}
+<tr>
+<td>{{ row['kod_stacji'] }}</td>
+<td>{{ row['nazwa_stacji'] }}</td>
+<td>{{ row['lon'] }}, {{ row['lat'] }}</td>
+<td>{{ row['stan'] }}</td>
+</tr>
+                    {% endfor %}
+</tbody>
+</table>
+</div>
+ 
+        <div class="footer">
+            Ostatnia aktualizacja: {{ timestamp }} | Liczba rekordów: {{ data|length }}
+</div>
 </body>
 </html>
-    """, timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    """)
  
-# Trasa do odświeżenia danych
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    final_html = html_template.render(
+        data=data,
+        alarm_state=alarm_state,
+        warning_state=warning_state,
+        normal_state=normal_state,
+        timestamp=timestamp
+    )
+ 
+    with open(output_file, 'w', encoding='utf-8') as f:
+        f.write(final_html)
+ 
+    print(f"✅ Wygenerowano plik HTML: {output_file}")
+ 
+# Strona główna
+@app.route('/')
+def index():
+    data = pd.read_csv(CSV_FILE, delimiter=';')
+    generate_html_from_csv()
+    return render_template_string("{{ html }}")
+ 
+# Trasa do odświeżania danych
 @app.route('/refresh')
 def refresh():
     new_data = refresh_and_save_data()
