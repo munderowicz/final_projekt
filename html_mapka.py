@@ -1,6 +1,39 @@
 import csv
 from jinja2 import Template
 from datetime import datetime
+import requests
+import pandas as pd
+
+# URL API hydro2 (przykładowy URL, zastąp rzeczywistym)
+API_URL = "https://danepubliczne.imgw.pl/api/data/hydro2"
+
+# Plik, w którym przechowywane są dane
+CSV_FILE = 'hydro_data.csv'
+
+def fetch_new_data():
+    """Pobieranie nowych danych z API"""
+    response = requests.get(API_URL)
+    if response.status_code == 200:
+        return response.json()  # Zwraca dane w formacie JSON
+    else:
+        return None
+
+def save_new_data(data, csv_file=CSV_FILE):
+    """Zapisuje nowe dane do pliku CSV"""
+    df = pd.DataFrame(data)
+    df.to_csv(csv_file, index=False, encoding='utf-8-sig')
+
+def refresh_and_save_data():
+    """Usuwa stare dane w pliku i zapisuje nowe dane"""
+    new_data = fetch_new_data()
+    if new_data:
+        # Usuwamy stare dane
+        with open(CSV_FILE, 'w', encoding='utf-8-sig') as f:
+            f.truncate(0)
+        # Zapisujemy nowe dane
+        save_new_data(new_data)
+        return new_data
+    return None
 
 def classify_water_levels(data):
     """Klasyfikuje stany wód na podstawie wartości w kolumnie 'stan'"""
@@ -24,6 +57,7 @@ def classify_water_levels(data):
     return alarm_state, warning_state, normal_state
 
 def generate_html_from_csv(csv_file='hydro_data.csv', output_file='hydro_table.html'):
+    """Generuje HTML z danymi z pliku CSV"""
     # Wczytaj dane z pliku CSV
     data = []
     with open(csv_file, mode='r', encoding='utf-8-sig') as file:
@@ -33,7 +67,7 @@ def generate_html_from_csv(csv_file='hydro_data.csv', output_file='hydro_table.h
             cleaned_row = {k: (v if v != '' else None) for k, v in row.items()}
             data.append(cleaned_row)
 
-    # Klasyfikuj stany wód
+    # Klasyfikacja stanów wód
     alarm_state, warning_state, normal_state = classify_water_levels(data)
 
     # Szablon HTML z tabelami danych
@@ -131,6 +165,22 @@ def generate_html_from_csv(csv_file='hydro_data.csv', output_file='hydro_table.h
             .normal-summary {
                 background-color: #28a745;
             }
+            #refresh-button {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 30px;
+                background-color: #3498db;
+                color: white;
+                font-size: 16px;
+                border: none;
+                border-radius: 5px;
+                cursor: pointer;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            }
+            #refresh-button:hover {
+                background-color: #2980b9;
+            }
         </style>
     </head>
     <body>
@@ -147,6 +197,8 @@ def generate_html_from_csv(csv_file='hydro_data.csv', output_file='hydro_table.h
                 Stany normalne (<450): {{ normal_state|length }}
             </div>
         </div>
+
+        <button id="refresh-button" onclick="window.location.href='/refresh'">Odśwież dane</button>
 
         {% if alarm_state %}
         <h2>⚠️ Stany alarmowe (≥500)</h2>
@@ -311,12 +363,12 @@ def generate_html_from_csv(csv_file='hydro_data.csv', output_file='hydro_table.h
     # Zapisz do pliku
     with open(output_file, 'w', encoding='utf-8') as f:
         f.write(final_html)
-    
+
     print(f"✅ Wygenerowano plik HTML: {output_file}")
 
+# Funkcja uruchamiająca aplikację
 if __name__ == '__main__':
     generate_html_from_csv()
-
 
 
 
